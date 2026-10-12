@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}COO Plant Dashboard{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Office of the COO · Operations review · <span id="fy"></span></div>
+    <h1 id="pageTitle">Plant Performance Board</h1>
+  </div>
+  <div class="controls">
+    <label class="eyebrow" for="month">Month</label>
+    <select id="month"></select>
+    <div class="seg" id="buSeg" role="group" aria-label="Business unit"></div>
+  </div>
+</div>
+
+<section class="kpis" id="kpis" aria-label="Key indicators"><p class="muted">Loading…</p></section>
+
+<section class="panel">
+  <div class="sec-head">
+    <h2>Daily submission status</h2>
+    <div class="controls"><span class="muted" id="dailyCount" style="font-size:13px"></span>
+      <label class="eyebrow" for="day">Day</label><input id="day" type="date"></div>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>BU</th><th>Status</th><th class="r-num">Plan</th><th class="r-num">Actual</th><th class="r-num">Ach %</th><th class="r-num">OEE %</th>
+      <th class="r-num">OTD %</th><th class="r-num">Cust. rej</th><th class="r-num">Attend. %</th><th class="r-num">Breakdown h</th><th class="r-num">NM / FA / LTI</th><th>Remarks</th><th>Entered</th></tr></thead>
+    <tbody id="daily"></tbody>
+  </table></div>
+</section>
+
+<section id="plantSec">
+  <div class="sec-head"><h2>Plant scorecard · month to date</h2><p>Click a plant to drill in · RAG against target</p></div>
+  <div class="plants" id="plants"></div>
+</section>
+
+<section class="duo">
+  <div class="panel">
+    <div class="sec-head">
+      <h2 id="trendTitle">Production vs plan</h2>
+      <div class="legend"><span><i style="background:var(--plan)"></i>Plan</span><span><i style="background:var(--accent)"></i>Actual</span></div>
+    </div>
+    <div class="chart-wrap" id="trend"></div>
+  </div>
+  <div class="panel">
+    <div class="sec-head"><h2>Safety</h2><p>Days since last LTI</p></div>
+    <div id="safety"></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="sec-head"><h2>Open escalations</h2><p><span id="escCount"></span> · <a href="{{ url_for('escalations') }}">Manage</a></p></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>BU</th><th>Area</th><th>Issue</th><th>Owner</th><th class="r-num">Open days</th><th>Severity</th></tr></thead>
+    <tbody id="esc"></tbody>
+  </table></div>
+</section>
+
+<footer id="tfoot"></footer>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let D=null, sel="ALL", mi=0, keys=[];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=n=>n==null?"–":Math.round(n).toLocaleString("en-IN");
+const f1=n=>n==null?"–":(+n).toFixed(1);
+const col=s=>({g:"good",a:"warn",r:"bad"}[s]||"line");
+const txt={g:"On track",a:"Watch",r:"Off track",n:"No data"};
+function rag(v,t,higher,band){
+  if(v==null||t==null) return "n";
+  band=band??(higher?0.03*t:0.15*t);
+  return higher ? (v>=t?"g":v>=t-band?"a":"r") : (v<=t?"g":v<=t+band?"a":"r");
+}
+const S=b=>b==="ALL"?D.all:D.plants[b];
+const val=(k,b,i=mi)=>S(b)[k][i];
+const nP=b=>b==="ALL"?keys.length:1;
+
+function spark(vals,s){
+  vals=vals.filter(v=>v!=null);
+  if(vals.length<2) return "";
+  const w=84,h=26,mn=Math.min(...vals),mx=Math.max(...vals),r=mx-mn||1;
+  const pts=vals.map((v,i)=>[i*(w-4)/(vals.length-1)+2,h-3-(v-mn)/r*(h-6)]);
+  const d=pts.map(p=>p.join(",")).join(" "),last=pts[pts.length-1],c=`var(--${s==="n"?"muted":col(s)})`;
+  return `<svg viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="2,${h} ${d} ${w-2},${h}" fill="${c}" fill-opacity=".12" stroke="none"/><polyline points="${d}" fill="none" stroke="${c}" stroke-width="1.6"/><circle cx="${last[0]}" cy="${last[1]}" r="2.6" fill="${c}"/></svg>`;
+}
+
+function renderKpis(){
+  const b=sel,T=D.targets,n=nP(b),hist=k=>S(b)[k].slice(0,mi+1);
+  const lti=val("lti",b), days=val("days",b);
+  const items=[
+    {l:"Production achievement",v:f1(val("ach",b)),u:"%",s:rag(val("ach",b),T.ach,true,3),sub:`${fmt(val("act",b))} / ${fmt(val("plan",b))} units`,sp:hist("ach")},
+    {l:"OEE",v:f1(val("oee",b)),u:"%",s:rag(val("oee",b),T.oee,true),sub:`Target ${T.oee}%`,sp:hist("oee")},
+    {l:"On-time delivery",v:f1(val("otd",b)),u:"%",s:rag(val("otd",b),T.otd,true),sub:`Target ${T.otd}%`,sp:hist("otd")},
+    {l:"Customer PPM",v:fmt(val("ppm",b)),u:"",s:rag(val("ppm",b),T.ppm,false),sub:`Target ≤ ${T.ppm}`,sp:hist("ppm")},
+    {l:"Breakdown hours",v:f1(val("bd",b)),u:"h",s:rag(val("bd",b),T.bd*n,false),sub:`Limit ${T.bd*n} h / month`,sp:hist("bd")},
+    {l:"LTI · Near-miss",v:lti??"–",u:` · ${val("nm",b)??"–"}`,s:lti==null?"n":lti>0?"r":"g",sub:`First aid: ${val("fa",b)??"–"}`,sp:hist("nm")},
+    {l:"Attendance",v:f1(val("att",b)),u:"%",s:rag(val("att",b),T.att,true),sub:`Target ${T.att}%`,sp:hist("att")},
+    {l:"Open issues",v:val("issues",b)??"–",u:"",s:rag(val("issues",b),T.issues*n,false,0.4*T.issues*n),sub:`5S score ${f1(val("s5",b))}`,sp:hist("issues")}
+  ];
+  $("kpis").innerHTML=items.map(k=>`
+    <div class="kpi" style="--s:var(--${col(k.s)})">
+      <div class="lbl">${k.l}</div>
+      <div class="val num">${k.v}<small>${k.u}</small></div>
+      <div class="row"><span class="num">${k.sub}</span>${spark(k.sp,k.s)}</div>
+    </div>`).join("");
+}
+
+function renderPlants(){
+  const T=D.targets;
+  $("plants").innerHTML=keys.map(k=>{
+    const p=D.plants[k],g=x=>p[x][mi];
+    const ch=[rag(g("ach"),T.ach,true,3),rag(g("oee"),T.oee,true),rag(g("otd"),T.otd,true),rag(g("ppm"),T.ppm,false),rag(g("bd"),T.bd,false),g("lti")==null?"n":g("lti")>0?"r":"g"];
+    const overall=g("days")?(ch.includes("r")?"r":ch.filter(c=>c==="a").length>=2?"a":"g"):"n";
+    const m=(l,v,s)=>`<div><span>${l}</span><b class="num" style="color:var(--${s==="a"?"warn":s==="r"?"bad":"ink"})">${v}</b></div>`;
+    const ach=g("ach");
+    return `<article class="plant ${sel===k?"sel":sel!=="ALL"&&keys.length>1?"dim":""}" data-bu="${k}" tabindex="0" role="button" aria-label="Show ${esc(p.name)}">
+      <div class="plant-top"><div><b>${esc(p.name)}</b><span class="sub">${esc(p.site)} · ${g("days")||0} days reported</span></div><span class="pill ${overall}">${txt[overall]}</span></div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><span class="muted">Plan achievement</span><b class="num">${f1(ach)}%</b></div>
+        <div class="bar"><i style="width:${Math.min(ach||0,100)}%;background:var(--${ch[0]==="g"?"accent":ch[0]==="a"?"warn":"bad"})"></i></div>
+      </div>
+      <div class="metrics">
+        ${m("OEE",f1(g("oee"))+"%",ch[1])}${m("OTD",f1(g("otd"))+"%",ch[2])}${m("PPM",fmt(g("ppm")),ch[3])}
+        ${m("Breakdown",f1(g("bd"))+" h",ch[4])}${m("LTI",g("lti")??"–",ch[5])}${m("5S",f1(g("s5")),rag(g("s5"),T.s5,true,5))}
+      </div>
+    </article>`;}).join("");
+  if(keys.length>1) document.querySelectorAll(".plant").forEach(el=>{
+    const go=()=>setBU(sel===el.dataset.bu?"ALL":el.dataset.bu);
+    el.onclick=go; el.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go();}};
+  });
+}
+
+function renderTrend(){
+  const b=sel,P=S(b).plan.map(v=>v||0),A=S(b).act.map(v=>v||0),M=D.months.map(m=>m.split(" ")[0]);
+  $("trendTitle").textContent=`Production vs plan · ${b==="ALL"?"All plants":D.plants[b].name}`;
+  const W=640,H=280,L=56,R=12,Tp=24,B=34,iw=W-L-R,ih=H-Tp-B;
+  const raw=Math.max(...P,...A,1),mag=Math.pow(10,Math.floor(Math.log10(raw))),step=raw/mag>5?mag:raw/mag>2?mag/2:mag/5;
+  const max=Math.ceil(raw*1.08/step)*step,y=v=>Tp+ih-v/max*ih,gw=iw/M.length,bw=Math.min(22,gw*0.3);
+  let g="";
+  for(let v=0;v<=max+1e-9;v+=step){g+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-8}" y="${y(v)+4}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="IBM Plex Mono,monospace">${v>=1000?+(v/1000).toFixed(1)+"k":v}</text>`;}
+  M.forEach((m,i)=>{
+    const cx=L+gw*i+gw/2,on=i===mi,ach=P[i]?A[i]/P[i]*100:null,s=rag(ach,D.targets.ach,true,3);
+    g+=`<rect x="${cx-bw-2}" y="${y(P[i])}" width="${bw}" height="${y(0)-y(P[i])}" fill="var(--plan)" rx="2"/>`;
+    g+=`<rect x="${cx+2}" y="${y(A[i])}" width="${bw}" height="${y(0)-y(A[i])}" fill="var(--accent)" fill-opacity="${on?1:.6}" rx="2"/>`;
+    if(ach!=null) g+=`<text x="${cx}" y="${Math.min(y(P[i]),y(A[i]))-7}" text-anchor="middle" font-size="12" font-weight="600" fill="var(--${col(s)})" font-family="Barlow Condensed,sans-serif">${ach.toFixed(1)}%</text>`;
+    g+=`<text x="${cx}" y="${H-12}" text-anchor="middle" font-size="12" fill="var(--${on?"ink":"muted"})" font-weight="${on?600:400}" font-family="Barlow,sans-serif">${m}</text>`;
+  });
+  $("trend").innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Monthly production plan versus actual">${g}</svg>`;
+}
+
+function renderSafety(){
+  const sum=a=>a.reduce((x,y)=>x+(y||0),0),today=new Date(D.today);
+  $("safety").innerHTML=keys.map(k=>{
+    const p=D.plants[k],days=p.lastLti?Math.floor((today-new Date(p.lastLti))/864e5):null;
+    const s=days==null?"g":days>=180?"g":days>=60?"a":"r";
+    return `<div class="srow" style="${sel!=="ALL"&&sel!==k?"opacity:.5":""}">
+      <div class="bu">${esc(p.name)}</div>
+      <div class="detail">FY LTI <b class="num">${sum(p.lti)}</b> · Near-miss <b class="num">${sum(p.nm)}</b> · First aid <b class="num">${sum(p.fa)}</b></div>
+      <div class="days num" style="color:var(--${col(s)})">${days??"–"}<small>${days==null?"no LTI on record":"days"}</small></div>
+    </div>`;}).join("");
+}
+
+function renderEsc(){
+  const rows=D.escalations.filter(e=>sel==="ALL"||e.bu===sel).sort((a,b)=>(a.sev==="r"?0:1)-(b.sev==="r"?0:1)||b.days-a.days);
+  $("escCount").textContent=`${rows.filter(r=>r.sev==="r").length} critical · ${rows.length} open`;
+  $("esc").innerHTML=rows.length?rows.map(e=>`<tr><td class="bu">${esc(e.bu)}</td><td>${esc(e.area)}</td><td>${esc(e.issue)}</td><td class="own">${esc(e.owner)}</td><td class="r-num">${e.days}</td><td><span class="pill ${e.sev}">${e.sev==="r"?"Critical":"High"}</span></td></tr>`).join("")
+    :`<tr><td colspan="6" class="muted">No open escalations.</td></tr>`;
+}
+
+function loadDaily(){
+  fetch("/api/daily?date="+$("day").value).then(r=>r.json()).then(d=>{
+    if(d.error) throw new Error(d.error);
+    const rows=d.rows.filter(r=>sel==="ALL"||r.bu===sel), done=rows.filter(r=>r.submitted).length;
+    $("dailyCount").textContent=`${done} of ${rows.length} submitted`;
+    $("daily").innerHTML=rows.map(r=>!r.submitted
+      ?`<tr><td class="bu">${esc(r.name)}</td><td><span class="pill r">Pending</span></td><td colspan="11" class="muted">Not submitted yet</td></tr>`
+      :`<tr><td class="bu">${esc(r.name)}</td><td><span class="pill g">Submitted</span></td>
+        <td class="r-num">${fmt(r.plan)}</td><td class="r-num">${fmt(r.act)}</td>
+        <td class="r-num" style="color:var(--${col(rag(r.ach,D.targets.ach,true,3))})">${f1(r.ach)}</td>
+        <td class="r-num">${f1(r.oee)}</td><td class="r-num">${f1(r.otd)}</td><td class="r-num">${r.rej}</td>
+        <td class="r-num">${f1(r.att)}</td><td class="r-num">${r.bd}</td>
+        <td class="r-num" style="${r.lti>0?"color:var(--bad);font-weight:600":""}">${r.nm} / ${r.fa} / ${r.lti}</td>
+        <td class="own">${esc(r.remarks)}</td><td class="own">${esc(r.by)} · ${esc(r.at)}</td></tr>`).join("");
+  }).catch(e=>{$("daily").innerHTML=`<tr><td colspan="13" style="color:var(--bad)">${esc(e.message)}</td></tr>`;});
+}
+
+function setBU(b){
+  sel=b; try{localStorage.setItem("coo-bu",b)}catch(e){}
+  document.querySelectorAll("#buSeg button").forEach(x=>x.setAttribute("aria-pressed",x.dataset.bu===b));
+  renderAll(); loadDaily();
+}
+function renderAll(){renderKpis();renderPlants();renderTrend();renderSafety();renderEsc();}
+
+fetch("/api/dashboard").then(r=>r.json()).then(d=>{
+  if(d.error) throw new Error(d.error);
+  D=d; keys=Object.keys(d.plants); mi=d.months.length-1;
+  $("fy").textContent=d.fy;
+  const T=d.targets;
+  $("tfoot").textContent=`Targets · Plan ach ≥ ${T.ach}% · OEE ≥ ${T.oee}% · OTD ≥ ${T.otd}% · Customer PPM ≤ ${T.ppm} · Attendance ≥ ${T.att}% · 5S ≥ ${T.s5} · Breakdown ≤ ${T.bd} h/plant/month · Open issues ≤ ${T.issues}/plant`;
+  $("month").innerHTML=d.months.map((m,i)=>`<option value="${i}" ${i===mi?"selected":""}>${m}</option>`).join("");
+  $("month").onchange=()=>{mi=+$("month").value;renderAll();};
+  $("day").value=d.today; $("day").max=d.today; $("day").onchange=loadDaily;
+  if(d.role==="bu"){
+    sel=d.plant; $("buSeg").hidden=true; $("pageTitle").textContent=d.plants[d.plant].name+" Performance";
+  }else{
+    $("buSeg").innerHTML=["ALL",...keys].map(k=>`<button type="button" data-bu="${k}" aria-pressed="false">${k==="ALL"?"All plants":esc(d.plants[k].name)}</button>`).join("");
+    document.querySelectorAll("#buSeg button").forEach(x=>x.onclick=()=>setBU(x.dataset.bu));
+    try{const s=localStorage.getItem("coo-bu"); if(s&&(s==="ALL"||d.plants[s])) sel=s;}catch(e){}
+  }
+  setBU(sel);
+}).catch(e=>{$("kpis").innerHTML=`<p style="color:var(--bad)">Could not load dashboard data: ${esc(e.message)}</p>`;});
+</script>
+{% endblock %}

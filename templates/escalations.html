@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Escalations{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">Issues needing COO attention</div><h1>Escalations</h1></div></div>
+
+<form method="post" class="panel" style="display:grid;gap:12px">
+  <h2>Raise an escalation</h2>
+  <input type="hidden" name="action" value="raise">
+  <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+    {% if user.role == 'coo' %}
+    <div class="f"><label for="plant_code">Plant</label>
+      <select id="plant_code" name="plant_code">{% for p in plants %}<option value="{{ p.code }}">{{ p.name }}</option>{% endfor %}</select></div>
+    {% endif %}
+    <div class="f"><label for="area">Area</label>
+      <select id="area" name="area">{% for a in areas %}<option>{{ a }}</option>{% endfor %}</select></div>
+    <div class="f"><label for="severity">Severity</label>
+      <select id="severity" name="severity"><option>High</option><option>Critical</option></select></div>
+    <div class="f"><label for="owner">Owner</label><input id="owner" name="owner" maxlength="100" placeholder="e.g. Maintenance Mgr"></div>
+  </div>
+  <div class="f"><label for="issue">Issue</label><input id="issue" name="issue" maxlength="255" required placeholder="What is the problem and what support is needed"></div>
+  <div class="actions"><button class="btn" type="submit">Raise escalation</button></div>
+</form>
+
+<section class="panel">
+  <div class="sec-head"><h2>Open</h2><p>{{ open_rows|length }} open</p></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>BU</th><th>Area</th><th>Issue</th><th>Owner</th><th>Raised</th><th class="r-num">Days</th><th>Severity</th><th>Close</th></tr></thead>
+    <tbody>
+    {% for e in open_rows %}
+      <tr>
+        <td class="bu">{{ e.plant_code }}</td><td>{{ e.area }}</td><td>{{ e.issue }}</td>
+        <td class="own">{{ e.owner }}</td><td class="own">{{ e.raised_on.strftime('%d %b') }} · {{ e.raised_by }}</td>
+        <td class="r-num">{{ e.days }}</td>
+        <td><span class="pill {{ 'r' if e.severity == 'Critical' else 'a' }}">{{ e.severity }}</span></td>
+        <td><form method="post" class="actions" style="gap:6px;flex-wrap:nowrap">
+          <input type="hidden" name="action" value="close"><input type="hidden" name="id" value="{{ e.id }}">
+          <input id="note{{ e.id }}" name="note" placeholder="Closure note" maxlength="255" style="min-width:140px;padding:5px 8px;font-size:13px" aria-label="Closure note">
+          <button class="btn small ghost" type="submit">Close</button></form></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted">No open escalations.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="panel">
+  <div class="sec-head"><h2>Recently closed</h2><p>Last 20</p></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>BU</th><th>Area</th><th>Issue</th><th>Raised</th><th>Closed</th><th>Note</th></tr></thead>
+    <tbody>
+    {% for e in closed %}
+      <tr><td class="bu">{{ e.plant_code }}</td><td>{{ e.area }}</td><td>{{ e.issue }}</td>
+        <td class="own">{{ e.raised_on.strftime('%d %b') }}</td>
+        <td class="own">{{ e.closed_on.strftime('%d %b') if e.closed_on else '' }} · {{ e.closed_by }}</td>
+        <td class="own">{{ e.closure_note or '' }}</td></tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">Nothing closed yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

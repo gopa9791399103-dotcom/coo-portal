@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">COO only</div><h1>Settings</h1></div></div>
+
+<form method="post" class="panel" style="display:grid;gap:12px">
+  <input type="hidden" name="action" value="targets">
+  <h2>KPI targets</h2>
+  <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+    {% for k, lbl in labels.items() %}
+    <div class="f"><label for="t_{{ k }}">{{ lbl }}</label>
+      <input id="t_{{ k }}" name="{{ k }}" type="number" step="0.01" min="0" value="{{ targets.get(k, '') }}" required></div>
+    {% endfor %}
+  </div>
+  <div class="actions"><button class="btn" type="submit">Save targets</button></div>
+</form>
+
+<form method="post" class="panel" style="display:grid;gap:12px">
+  <input type="hidden" name="action" value="plants">
+  <h2>Plants</h2>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Code</th><th>Display name</th><th>Site / process</th><th>Plant head</th><th>Last LTI before this system</th></tr></thead>
+    <tbody>
+    {% for p in plants %}
+      <tr><td class="bu">{{ p.code }}</td>
+        <td><input id="name_{{ p.code }}" name="name_{{ p.code }}" value="{{ p.name }}" maxlength="50" aria-label="Name"></td>
+        <td><input id="site_{{ p.code }}" name="site_{{ p.code }}" value="{{ p.site or '' }}" maxlength="100" aria-label="Site"></td>
+        <td><input id="head_{{ p.code }}" name="head_{{ p.code }}" value="{{ p.head or '' }}" maxlength="100" aria-label="Plant head"></td>
+        <td><input id="lti_{{ p.code }}" name="lti_{{ p.code }}" type="date" value="{{ p.last_lti_date.isoformat() if p.last_lti_date else '' }}" aria-label="Last LTI date"></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="actions"><button class="btn" type="submit">Save plants</button>
+    <span class="muted" style="font-size:13px">LTIs entered in the daily form update "days since last LTI" automatically.</span></div>
+</form>
+
+<section class="panel">
+  <div class="sec-head"><h2>Logins</h2><p>Reset a password or disable a login</p></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Plant</th><th>Last login</th><th>Status</th><th>Reset password</th><th></th></tr></thead>
+    <tbody>
+    {% for x in users %}
+      <tr>
+        <td class="bu">{{ x.username }}</td><td>{{ x.full_name }}</td><td>{{ 'COO' if x.role == 'coo' else 'BU head' }}</td>
+        <td>{{ x.plant_code or '–' }}</td>
+        <td class="own">{{ x.last_login.strftime('%d %b %H:%M') if x.last_login else 'Never' }}</td>
+        <td><span class="pill {{ 'g' if x.active else 'n' }}">{{ 'Active' if x.active else 'Disabled' }}</span></td>
+        <td><form method="post" class="actions" style="gap:6px;flex-wrap:nowrap">
+          <input type="hidden" name="action" value="reset_pw"><input type="hidden" name="id" value="{{ x.id }}">
+          <input id="pw{{ x.id }}" name="new" type="password" minlength="6" required placeholder="New password" autocomplete="new-password" style="min-width:130px;padding:5px 8px;font-size:13px" aria-label="New password for {{ x.username }}">
+          <button class="btn small ghost" type="submit">Reset</button></form></td>
+        <td>{% if x.id != user.id %}<form method="post">
+          <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="{{ x.id }}">
+          <button class="btn small ghost" type="submit">{{ 'Disable' if x.active else 'Enable' }}</button></form>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

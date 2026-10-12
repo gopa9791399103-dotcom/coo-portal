@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Log in · Plant Performance Board{% endblock %}
+{% block content %}
+<div class="login-box">
+  <div>
+    <div class="eyebrow">Office of the COO</div>
+    <h1>Plant Performance Board</h1>
+  </div>
+  <form method="post" class="panel">
+    <div class="f"><label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required autofocus></div>
+    <div class="f"><label for="pw">Password</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="btn" type="submit">Log in</button>
+  </form>
+  <p class="muted" style="margin:0;font-size:13px">BU heads log in to enter daily figures. The COO login sees all plants.</p>
+</div>
+{% endblock %}

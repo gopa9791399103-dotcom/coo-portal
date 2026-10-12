@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Daily entry · {{ plant.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">{{ plant.site }} · Daily report</div>
+    <h1>{{ plant.name }} · {{ d.strftime('%a %d %b %Y') }}</h1>
+  </div>
+  <form method="get" class="controls">
+    <label class="eyebrow" for="date">Date</label>
+    <input id="date" type="date" name="date" value="{{ d.isoformat() }}" min="{{ min_date }}" max="{{ today.isoformat() }}" onchange="this.form.submit()">
+  </form>
+</div>
+
+<section>
+  <div class="sec-head"><h2>Last 7 days</h2><p>Green = submitted · Red = missing · you can edit today and the previous {{ edit_days }} days</p></div>
+  <div class="strip">
+    {% for s in strip %}
+    <a class="chip {{ 'ok' if s.ok else 'miss' }} {{ 'cur' if s.d == d else '' }} {{ '' if s.edit else 'lock' }}" href="{{ url_for('entry', date=s.d.isoformat()) }}">
+      <small>{{ s.d.strftime('%a') }}</small><b>{{ s.d.strftime('%d') }}</b>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+{% if not can_edit %}
+<div class="flash warn">This date is outside the {{ edit_days }}-day edit window. Ask the COO office if a correction is needed.</div>
+{% endif %}
+
+<form method="post" id="entryForm">
+  <input type="hidden" name="date" value="{{ d.isoformat() }}">
+  <div class="form-grid">
+    {% for title, names in groups %}
+    <fieldset {{ 'disabled' if not can_edit else '' }}>
+      <legend>{{ title }}</legend>
+      {% for n in names %}{% set f = fields[n] %}
+      <div class="f {{ 'err' if errors.get(n) else '' }}">
+        <label for="{{ n }}">{{ f[0] }} <span>· {{ f[5] }}{{ '' if f[4] or n not in ('plan_qty','actual_qty') else ' · required' }}</span></label>
+        <input id="{{ n }}" name="{{ n }}" type="number" inputmode="decimal" min="{{ f[2] }}" {% if f[3] is not none %}max="{{ f[3] }}"{% endif %}
+               step="{{ '1' if f[1] == 'int' else '0.01' }}" value="{{ values.get(n, '') }}"
+               {{ 'required' if n in ('plan_qty','actual_qty') else '' }} placeholder="{{ '' if f[4] else '0' }}">
+        {% if errors.get(n) %}<div class="msg">{{ errors[n] }}</div>{% endif %}
+      </div>
+      {% endfor %}
+      {% if title == 'Production' %}<div class="calc">Achievement <b id="c_ach">–</b></div>{% endif %}
+      {% if title == 'Delivery' %}<div class="calc">OTD <b id="c_otd">–</b></div>{% endif %}
+      {% if title == 'Quality' %}<div class="calc">Customer PPM <b id="c_ppm">–</b></div>{% endif %}
+      {% if title == 'Manpower' %}<div class="calc">Attendance <b id="c_att">–</b></div>{% endif %}
+    </fieldset>
+    {% endfor %}
+    <fieldset {{ 'disabled' if not can_edit else '' }}>
+      <legend>Remarks</legend>
+      <div class="f {{ 'err' if errors.get('remarks') else '' }}">
+        <label for="remarks">Key points for the COO <span>· breakdowns, LTI details, customer issues</span></label>
+        <textarea id="remarks" name="remarks" rows="5" maxlength="500">{{ values.get('remarks', '') }}</textarea>
+        {% if errors.get('remarks') %}<div class="msg">{{ errors['remarks'] }}</div>{% endif %}
+      </div>
+    </fieldset>
+  </div>
+  <div class="actions" style="margin-top:16px">
+    {% if can_edit %}<button class="btn" type="submit">Save {{ d.strftime('%d %b') }} entry</button>{% endif %}
+    {% if values.get('_meta') %}<span class="muted" style="font-size:13px">{{ values['_meta'] }}</span>{% endif %}
+  </div>
+</form>
+
+<section class="panel">
+  <div class="sec-head"><h2>Recent entries</h2><p>Last 14 days</p></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Date</th><th class="r-num">Plan</th><th class="r-num">Actual</th><th class="r-num">Ach %</th><th class="r-num">OEE %</th>
+      <th class="r-num">Cust. rej</th><th class="r-num">Breakdown h</th><th class="r-num">NM / FA / LTI</th><th>Remarks</th><th>By</th><th></th></tr></thead>
+    <tbody>
+    {% for h in hist %}
+      <tr>
+        <td class="num">{{ h.entry_date.strftime('%a %d %b') }}</td>
+        <td class="r-num">{{ '{:,}'.format(h.plan_qty) }}</td>
+        <td class="r-num">{{ '{:,}'.format(h.actual_qty) }}</td>
+        <td class="r-num">{{ h.ach if h.ach is not none else '–' }}</td>
+        <td class="r-num">{{ '%g'|format(h.oee) if h.oee is not none else '–' }}</td>
+        <td class="r-num">{{ h.customer_rej }}</td>
+        <td class="r-num">{{ '%g'|format(h.breakdown_hrs) }}</td>
+        <td class="r-num">{{ h.near_miss }} / {{ h.first_aid }} / {{ h.lti }}</td>
+        <td class="own">{{ h.remarks or '' }}</td>
+        <td class="own">{{ h.entered_by }}</td>
+        <td>{% if h.can_edit %}<a href="{{ url_for('entry', date=h.entry_date.isoformat()) }}">Edit</a>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="11" class="muted">No entries yet. Fill today's figures above and press Save.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const v = id => { const x = parseFloat(document.getElementById(id).value); return isNaN(x) ? null : x; };
+  const set = (id, t) => document.getElementById(id).textContent = t;
+  function calc(){
+    const p=v("plan_qty"), a=v("actual_qty"), du=v("orders_due"), ot=v("orders_on_time"),
+          rj=v("customer_rej"), mr=v("mp_required"), mp=v("mp_present");
+    set("c_ach", p ? (a/p*100).toFixed(1)+" %" : "–");
+    set("c_otd", du ? ((ot||0)/du*100).toFixed(1)+" %" : "–");
+    set("c_ppm", a ? Math.round((rj||0)/a*1e6).toLocaleString("en-IN") : "–");
+    set("c_att", mr ? ((mp||0)/mr*100).toFixed(1)+" %" : "–");
+  }
+  document.getElementById("entryForm").addEventListener("input", calc);
+  calc();
+})();
+</script>
+{% endblock %}
