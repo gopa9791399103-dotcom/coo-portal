@@ -57,4 +57,13 @@
     </tbody>
   </table></div>
 </section>
+
+<section class="panel" style="display:grid;gap:12px">
+  <div class="sec-head"><h2>Sample data</h2><p>{{ sample_rows }} sample rows in the database</p></div>
+  <p class="muted" style="margin:0;max-width:70ch">Fills every working day from 1 April to yesterday with example figures so you can see the dashboard working. Days that already have a real entry are skipped. Clear it before BU heads start real entry.</p>
+  <div class="actions">
+    <form method="post"><input type="hidden" name="action" value="load_sample"><button class="btn" type="submit">Load sample data</button></form>
+    <form method="post"><input type="hidden" name="action" value="clear_sample"><button class="btn ghost" type="submit" {{ 'disabled' if not sample_rows else '' }}>Clear sample data</button></form>
+  </div>
+</section>
 {% endblock %}

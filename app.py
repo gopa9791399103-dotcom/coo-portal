@@ -620,11 +620,68 @@ def settings():
             if uid != request.user["id"]:
                 q("UPDATE users SET active=1-active WHERE id=%s", (uid,))
                 flash("User status changed.", "good")
+        elif action == "load_sample":
+            n = load_sample()
+            flash(f"Loaded {n} sample rows. Real entries were not changed.", "good")
+        elif action == "clear_sample":
+            n = q("DELETE FROM daily_kpi WHERE entered_by='sample'")
+            q("DELETE FROM escalations WHERE raised_by='sample'")
+            flash("Sample data removed. Real entries were kept.", "good")
         return redirect(url_for("settings"))
     t = targets()
     return render_template("settings.html", active="set", targets=t, labels=TARGET_LABELS,
                            plants=q("SELECT * FROM plants ORDER BY sort_order, code"),
-                           users=q("SELECT * FROM users ORDER BY role DESC, username"))
+                           users=q("SELECT * FROM users ORDER BY role DESC, username"),
+                           sample_rows=q("SELECT COUNT(*) n FROM daily_kpi WHERE entered_by='sample'", one=True)["n"])
+
+
+# ------------------------------------------------------------------ sample data (COO > Settings)
+SAMPLE_PROFILE = {   # plan/day, OEE, OTD, PPM, attendance, breakdown h/day, 5S
+    "BU1": (1750, 77, 96, 400, 93, 1.2, 85),
+    "BU2": (1200, 69, 91, 620, 90, 2.0, 73),
+    "BU3": (1020, 81, 98, 270, 95, 0.6, 90),
+    "BU4": (1450, 74, 94, 500, 92, 1.5, 79),
+}
+
+
+def load_sample():
+    """Fill missing days from 1 April to yesterday with sample rows (entered_by='sample').
+    Never overwrites real entries."""
+    import random
+    rnd = random.Random(7)
+    codes = {p["code"] for p in q("SELECT code FROM plants")}
+    end = today()
+    d = date(end.year if end.month >= 4 else end.year - 1, 4, 1)
+    rows = []
+    while d < end:
+        if d.weekday() != 6:
+            for code, (plan, oee, otd, ppm, att, bd, s5) in SAMPLE_PROFILE.items():
+                if code not in codes:
+                    continue
+                act = int(plan * rnd.uniform(0.9, 1.04))
+                due = rnd.randint(8, 14)
+                mpr = rnd.randint(110, 140)
+                rows.append((code, d, plan, act, round(oee + rnd.uniform(-4, 4), 1), due,
+                             min(due, round(due * otd / 100 + rnd.uniform(-1, 1))),
+                             round(act * ppm / 1e6 * rnd.uniform(0.3, 1.8)),
+                             mpr, round(mpr * (att + rnd.uniform(-3, 3)) / 100),
+                             round(max(0, bd + rnd.uniform(-1, 1.5)), 1),
+                             rnd.choice([0, 0, 0, 1, 1, 2]), rnd.choice([0] * 12 + [1]),
+                             1 if rnd.random() < 0.003 else 0,
+                             round(s5 + rnd.uniform(-4, 4), 1) if d.weekday() == 4 else None,
+                             rnd.randint(3, 16)))
+        d += timedelta(days=1)
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            n = cur.executemany(
+                """INSERT IGNORE INTO daily_kpi (plant_code, entry_date, plan_qty, actual_qty, oee,
+                   orders_due, orders_on_time, customer_rej, mp_required, mp_present, breakdown_hrs,
+                   near_miss, first_aid, lti, s5_score, open_issues, remarks, entered_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'','sample')""", rows)
+    finally:
+        conn.close()
+    return n
 
 
 @app.errorhandler(403)

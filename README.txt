@@ -20,9 +20,9 @@ COO PLANT PERFORMANCE BOARD  -  setup
      bu3 / Bu3@123     BU3 head
      bu4 / Bu4@123     BU4 head
 
-5. OPTIONAL sample data to test the dashboard:  run seed_sample.py once
-   Remove it later in HeidiSQL:
-     DELETE FROM coo_portal.daily_kpi WHERE entered_by='sample';
+5. OPTIONAL sample data: log in as coo > Settings > "Load sample data".
+   Remove it with "Clear sample data" before BU heads start real entry.
+   Real entries are never overwritten or deleted by these buttons.
 
 Rules
  - BU heads can enter / correct today and the previous 3 days (EDIT_DAYS in app.py).
@@ -46,7 +46,7 @@ A. Put the code on GitHub
    git add .
    git commit -m "COO portal"
    (create an empty repo "coo-portal" on github.com, then)
-   git remote add origin https://github.com/<you>/coo-portal.git
+   git remote add origin https://github.com/gopa9791399103-dotcom/coo-portal.git
    git branch -M main
    git push -u origin main
 
@@ -68,4 +68,4 @@ B. Railway (railway.app)
    Later changes:  git add . ; git commit -m "change" ; git push   -> Railway redeploys.
 
    The online database is separate from your PC database.
-   Do NOT run seed_sample.py online.
+   Sample data online: coo > Settings > Load sample data.
