@@ -86,12 +86,23 @@ GROUPS = [
     ("Safety", ["near_miss", "first_aid", "lti"]),
     ("5S & issues", ["s5_score", "open_issues"]),
 ]
+# Achieved / Not achieved status entered daily by the BU head
+FLAGS = [
+    ("cost_ok", "C · Cost", "Within budget today: scrap, power, consumables, overtime"),
+    ("env_ok", "E · Environment", "No spill, emission, ETP / STP or waste deviation"),
+    ("legal_ok", "Legal / ESG", "No statutory, consent or licence non-compliance"),
+    ("audit_ok", "Audits", "No new audit NC raised, no audit overdue"),
+]
+FLAG_COLS = [f[0] for f in FLAGS]
+
 TARGET_LABELS = {
     "ach": "Plan achievement % (min)", "oee": "OEE % (min)", "otd": "On-time delivery % (min)",
     "ppm": "Customer PPM (max)", "att": "Attendance % (min)", "s5": "5S score (min)",
     "bd": "Breakdown hrs per plant per month (max)", "issues": "Open issues per plant (max)",
+    "flags": "C / E / Legal / Audits: % of days achieved for MTD & YTD (min)",
 }
-DEFAULT_TARGETS = {"ach": 98, "oee": 75, "otd": 95, "ppm": 500, "att": 92, "s5": 80, "bd": 40, "issues": 10}
+DEFAULT_TARGETS = {"ach": 98, "oee": 75, "otd": 95, "ppm": 500, "att": 92, "s5": 80, "bd": 40, "issues": 10,
+                   "flags": 90}
 DEFAULT_PLANTS = [
     ("BU1", "BU1", "Plant 1 · Assembly", "BU1 Head"),
     ("BU2", "BU2", "Plant 2 · Machining", "BU2 Head"),
@@ -198,6 +209,13 @@ def init_db():
         pass   # hosted MySQL: database already exists
     for sql in SCHEMA:
         q(sql)
+    have = {r["COLUMN_NAME"] for r in q(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=%s AND TABLE_NAME='daily_kpi'",
+        (DB_NAME,))}
+    for c in FLAG_COLS:
+        if c not in have:
+            q(f"ALTER TABLE daily_kpi ADD COLUMN {c} TINYINT NULL")
+            print(f"Added column daily_kpi.{c}")
     if not q("SELECT COUNT(*) n FROM plants", one=True)["n"]:
         for i, (code, name, site, head) in enumerate(DEFAULT_PLANTS):
             q("INSERT INTO plants (code,name,site,head,sort_order) VALUES (%s,%s,%s,%s,%s)",
@@ -270,7 +288,7 @@ def logout():
 @app.route("/")
 @login_required()
 def home():
-    return redirect(url_for("entry" if request.user["role"] == "bu" else "dashboard"))
+    return redirect(url_for("entry" if request.user["role"] == "bu" else "overview"))
 
 
 @app.route("/password", methods=["GET", "POST"])
@@ -338,7 +356,7 @@ def entry():
 
     if request.method == "POST":
         if not editable(d):
-            flash(f"You can only enter data for tdy and the previous {EDIT_DAYS} days.", "bad")
+            flash(f"You can only enter data for today and the previous {EDIT_DAYS} days.", "bad")
             return redirect(url_for("entry"))
         for name, (label, typ, lo, hi, nullable, _) in FIELDS.items():
             raw = request.form.get(name, "").strip()
@@ -356,6 +374,11 @@ def entry():
                 errors[name] = f"Must be between {lo} and {hi}" if hi is not None else f"Must be {lo} or more"
         remarks = request.form.get("remarks", "").strip()[:500]
         values["remarks"] = remarks
+        for c in FLAG_COLS:
+            raw = request.form.get(c, "")
+            values[c] = raw
+            if raw not in ("0", "1"):
+                errors[c] = "Choose Achieved or Not achieved"
 
         def val(n):
             raw = values.get(n, "")
@@ -368,11 +391,13 @@ def entry():
                 errors["orders_on_time"] = "Cannot be more than schedules due"
             if val("lti") > 0 and not remarks:
                 errors["remarks"] = "Describe the LTI in remarks"
+            elif any(values[c] == "0" for c in FLAG_COLS) and not remarks:
+                errors["remarks"] = "Explain each 'Not achieved' item in remarks"
         if errors:
             flash("Please correct the highlighted fields.", "bad")
         else:
-            cols = list(FIELDS) + ["remarks", "entered_by"]
-            data = [val(n) for n in FIELDS] + [remarks, u["username"]]
+            cols = list(FIELDS) + FLAG_COLS + ["remarks", "entered_by"]
+            data = [val(n) for n in FIELDS] + [int(values[c]) for c in FLAG_COLS] + [remarks, u["username"]]
             q(f"""INSERT INTO daily_kpi (plant_code, entry_date, {', '.join(cols)})
                   VALUES (%s, %s, {', '.join(['%s'] * len(cols))})
                   ON DUPLICATE KEY UPDATE {', '.join(f'{c}=VALUES({c})' for c in cols)}""",
@@ -384,6 +409,8 @@ def entry():
         if row:
             values = {n: ("" if row[n] is None else num(row[n])) for n in FIELDS}
             values["remarks"] = row["remarks"] or ""
+            for c in FLAG_COLS:
+                values[c] = "" if row[c] is None else str(row[c])
             values["_meta"] = f"Last saved by {row['entered_by']} at {row['updated_at'].strftime('%d %b, %H:%M')}"
 
     # last 7 days status strip + recent history
@@ -397,7 +424,7 @@ def entry():
         h["ach"] = pct(h["actual_qty"], h["plan_qty"])
         h["can_edit"] = editable(h["entry_date"])
     return render_template("entry.html", active="entry", plant=plant, d=d, today=tdy,
-                           can_edit=editable(d), fields=FIELDS, groups=GROUPS, values=values,
+                           can_edit=editable(d), fields=FIELDS, groups=GROUPS, flags=FLAGS, values=values,
                            errors=errors, strip=strip, hist=hist, edit_days=EDIT_DAYS,
                            min_date=(tdy - timedelta(days=EDIT_DAYS)).isoformat())
 
@@ -546,6 +573,200 @@ def api_daily():
     return jsonify({"date": d.isoformat(), "rows": out})
 
 
+# ------------------------------------------------------------------ overview (front page matrix)
+# key, column label, full name, rule shown on the detail page
+INDICATORS = [
+    ("s", "S", "Safety", "Red if any LTI in the period (and for a single day, any first aid case)."),
+    ("5s", "5S", "5S", "Average 5S audit score in the period vs target. A single day uses the latest audit score."),
+    ("q", "Q", "Quality", "Customer PPM = customer rejections ÷ actual qty × 1,000,000, vs target (max)."),
+    ("p", "P", "Production", "Plan achievement = actual qty ÷ plan qty, vs target (min)."),
+    ("c", "C", "Cost", "BU head's daily status. MTD / YTD: % of days achieved vs target."),
+    ("d", "D", "Delivery", "OTD = dispatched on time ÷ dispatch schedules due, vs target (min)."),
+    ("m", "M", "Manpower", "Attendance = manpower present ÷ manpower required, vs target (min)."),
+    ("e", "E", "Environment", "BU head's daily status. MTD / YTD: % of days achieved vs target."),
+    ("legal", "Legal / ESG", "Legal / ESG", "BU head's daily status. MTD / YTD: % of days achieved vs target."),
+    ("audits", "Audits", "Audits", "BU head's daily status. MTD / YTD: % of days achieved vs target."),
+    ("exception", "Any Exception", "Any exception", "Red if any escalation raised in the period is still open."),
+]
+IND_MAP = {i[0]: i for i in INDICATORS}
+FLAG_OF = {"c": "cost_ok", "e": "env_ok", "legal": "legal_ok", "audits": "audit_ok"}
+PERIODS = [("day", "Day"), ("mtd", "MTD"), ("ytd", "YTD")]
+
+
+def fy_start(d):
+    return date(d.year if d.month >= 4 else d.year - 1, 4, 1)
+
+
+def period_range(period, d):
+    if period == "day":
+        return d, d
+    if period == "mtd":
+        return d.replace(day=1), d
+    return fy_start(d), d
+
+
+def agg_rows(rows):
+    """Sum a list of daily_kpi rows into one record."""
+    if not rows:
+        return None
+    a = {"days": len(rows)}
+    for k in ["plan_qty", "actual_qty", "orders_due", "orders_on_time", "customer_rej", "mp_required",
+              "mp_present", "near_miss", "first_aid", "lti"]:
+        a[k] = sum(r[k] or 0 for r in rows)
+    s5 = [float(r["s5_score"]) for r in rows if r["s5_score"] is not None]
+    a["s5"] = sum(s5) / len(s5) if s5 else None
+    for c in FLAG_COLS:
+        vals = [r[c] for r in rows if r[c] is not None]
+        a[c] = (len(vals), sum(1 for v in vals if v == 1))
+    return a
+
+
+def evaluate(key, a, T, period, s5_latest=None, open_esc=0):
+    """Return (status g/r/n, value text, target text)."""
+    if key == "exception":
+        return ("r" if open_esc else "g", f"{open_esc} open escalation{'s' if open_esc != 1 else ''}", "0 open")
+    if a is None:
+        return ("n", "Not submitted", "")
+    if key == "s":
+        bad = a["lti"] > 0 or (period == "day" and a["first_aid"] > 0)
+        return ("r" if bad else "g", f"LTI {a['lti']} · FA {a['first_aid']} · NM {a['near_miss']}",
+                "0 LTI" + (" · 0 FA" if period == "day" else ""))
+    if key == "5s":
+        v = s5_latest if period == "day" else a["s5"]
+        if v is None:
+            return ("n", "No audit score", f"≥ {T['s5']}")
+        return ("g" if v >= T["s5"] else "r", f"5S score {v:.1f}", f"≥ {T['s5']}")
+    if key == "q":
+        if not a["actual_qty"]:
+            return ("n", "No production", f"≤ {T['ppm']} PPM")
+        ppm = a["customer_rej"] / a["actual_qty"] * 1e6
+        return ("g" if ppm <= T["ppm"] else "r",
+                f"{a['customer_rej']:,} rej · {ppm:,.0f} PPM", f"≤ {T['ppm']} PPM")
+    if key == "p":
+        if not a["plan_qty"]:
+            return ("n", "No plan", f"≥ {T['ach']}%")
+        ach = a["actual_qty"] / a["plan_qty"] * 100
+        return ("g" if ach >= T["ach"] else "r",
+                f"{a['actual_qty']:,} / {a['plan_qty']:,} · {ach:.1f}%", f"≥ {T['ach']}%")
+    if key == "d":
+        if not a["orders_due"]:
+            return ("n", "No schedules due", f"≥ {T['otd']}%")
+        otd = a["orders_on_time"] / a["orders_due"] * 100
+        return ("g" if otd >= T["otd"] else "r",
+                f"{a['orders_on_time']} / {a['orders_due']} on time · {otd:.1f}%", f"≥ {T['otd']}%")
+    if key == "m":
+        if not a["mp_required"]:
+            return ("n", "No manpower data", f"≥ {T['att']}%")
+        att = a["mp_present"] / a["mp_required"] * 100
+        return ("g" if att >= T["att"] else "r",
+                f"{a['mp_present']} / {a['mp_required']} · {att:.1f}%", f"≥ {T['att']}%")
+    n, ok = a[FLAG_OF[key]]
+    if not n:
+        return ("n", "Not reported", "")
+    if period == "day":
+        return ("g" if ok == n else "r", "Achieved" if ok == n else "Not achieved", "Achieved")
+    p = ok / n * 100
+    return ("g" if p >= T["flags"] else "r", f"{ok} of {n} days achieved · {p:.0f}%", f"≥ {T['flags']}% of days")
+
+
+def overview_data(user, d):
+    """Status for every plant x period x indicator, as of date d."""
+    plants = visible_plants(user)
+    codes = [p["code"] for p in plants]
+    T = targets()
+    ys = fy_start(d)
+    ph = ",".join(["%s"] * len(codes))
+    rows = q(f"SELECT * FROM daily_kpi WHERE plant_code IN ({ph}) AND entry_date BETWEEN %s AND %s",
+             codes + [ys - timedelta(days=31), d])
+    esc = q(f"""SELECT plant_code, raised_on FROM escalations WHERE status='Open'
+                AND plant_code IN ({ph}) AND raised_on BETWEEN %s AND %s""", codes + [ys, d])
+    by_plant = {c: [r for r in rows if r["plant_code"] == c] for c in codes}
+    out = {}
+    for c in codes:
+        prow = by_plant[c]
+        s5_hist = sorted((r for r in prow if r["s5_score"] is not None and
+                          d - timedelta(days=31) <= r["entry_date"] <= d), key=lambda r: r["entry_date"])
+        s5_latest = float(s5_hist[-1]["s5_score"]) if s5_hist else None
+        out[c] = {}
+        for per, _ in PERIODS:
+            a0, a1 = period_range(per, d)
+            a = agg_rows([r for r in prow if a0 <= r["entry_date"] <= a1])
+            n_esc = sum(1 for e in esc if e["plant_code"] == c and a0 <= e["raised_on"] <= a1)
+            out[c][per] = {k: evaluate(k, a, T, per, s5_latest, n_esc) for k, *_ in INDICATORS}
+    return plants, out, T
+
+
+@app.route("/overview")
+@login_required()
+def overview():
+    d = parse_date(request.args.get("date"), today() - timedelta(days=1))
+    d = min(d, today())
+    plants, data, _ = overview_data(request.user, d)
+    return render_template("overview.html", active="ov", d=d, plants=plants, data=data,
+                           indicators=INDICATORS, periods=PERIODS, fy=fy_label(d),
+                           max_date=today().isoformat())
+
+
+def fy_label(d):
+    y = fy_start(d).year
+    return f"FY {y}-{str(y + 1)[2:]}"
+
+
+@app.route("/indicator/<key>")
+@login_required()
+def indicator(key):
+    if key not in IND_MAP:
+        abort(404)
+    u = request.user
+    d = min(parse_date(request.args.get("date"), today() - timedelta(days=1)), today())
+    period = request.args.get("period", "mtd")
+    if period not in dict(PERIODS):
+        period = "mtd"
+    plants, data, T = overview_data(u, d)
+    codes = [p["code"] for p in plants]
+    bu = request.args.get("bu") if request.args.get("bu") in codes else codes[0]
+    a0, a1 = period_range(period, d)
+
+    # detail log for the chosen BU
+    log, esc_rows = [], []
+    if key == "exception":
+        esc_rows = q("""SELECT * FROM escalations WHERE plant_code=%s AND raised_on BETWEEN %s AND %s
+                        ORDER BY status='Open' DESC, raised_on DESC""", (bu, a0, a1))
+        for e in esc_rows:
+            e["days"] = ((e["closed_on"] or today()) - e["raised_on"]).days
+    elif period == "ytd":
+        rows = q("SELECT * FROM daily_kpi WHERE plant_code=%s AND entry_date BETWEEN %s AND %s",
+                 (bu, a0, a1))
+        m = a0
+        while m <= a1:
+            nxt = date(m.year + (m.month == 12), m.month % 12 + 1, 1)
+            mr = [r for r in rows if m <= r["entry_date"] < nxt]
+            st, val, _ = evaluate(key, agg_rows(mr), T, "mtd",
+                                  s5_latest=None)
+            log.append({"label": m.strftime("%b %Y"), "status": st, "value": val,
+                        "remarks": f"{len(mr)} days reported"})
+            m = nxt
+        log.reverse()
+    else:
+        start = d.replace(day=1) if period == "mtd" else d - timedelta(days=6)
+        rows = {r["entry_date"]: r for r in q(
+            "SELECT * FROM daily_kpi WHERE plant_code=%s AND entry_date BETWEEN %s AND %s", (bu, start, d))}
+        x = d
+        while x >= start:
+            r = rows.get(x)
+            s5l = float(r["s5_score"]) if r and r["s5_score"] is not None else None
+            st, val, _ = evaluate(key, agg_rows([r] if r else []), T, "day", s5_latest=s5l)
+            if key == "5s" and r and s5l is None:
+                st, val = "n", "No audit this day"
+            log.append({"label": x.strftime("%a %d %b"), "status": st, "value": val,
+                        "remarks": (r["remarks"] or "") if r else "", "by": r["entered_by"] if r else ""})
+            x -= timedelta(days=1)
+    return render_template("indicator.html", active="ov", ind=IND_MAP[key], key=key, d=d,
+                           period=period, periods=PERIODS, plants=plants, data=data, bu=bu,
+                           log=log, esc_rows=esc_rows, a0=a0, a1=a1, fy=fy_label(d),
+                           indicators=INDICATORS, max_date=today().isoformat())
+
+
 # ------------------------------------------------------------------ escalations
 @app.route("/escalations", methods=["GET", "POST"])
 @login_required()
@@ -669,7 +890,8 @@ def load_sample():
                              rnd.choice([0, 0, 0, 1, 1, 2]), rnd.choice([0] * 12 + [1]),
                              1 if rnd.random() < 0.003 else 0,
                              round(s5 + rnd.uniform(-4, 4), 1) if d.weekday() == 4 else None,
-                             rnd.randint(3, 16)))
+                             rnd.randint(3, 16),
+                             *[0 if rnd.random() < 0.04 else 1 for _ in FLAG_COLS]))
         d += timedelta(days=1)
     conn = get_db()
     try:
@@ -677,8 +899,9 @@ def load_sample():
             n = cur.executemany(
                 """INSERT IGNORE INTO daily_kpi (plant_code, entry_date, plan_qty, actual_qty, oee,
                    orders_due, orders_on_time, customer_rej, mp_required, mp_present, breakdown_hrs,
-                   near_miss, first_aid, lti, s5_score, open_issues, remarks, entered_by)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'','sample')""", rows)
+                   near_miss, first_aid, lti, s5_score, open_issues, cost_ok, env_ok, legal_ok, audit_ok,
+                   remarks, entered_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'','sample')""", rows)
     finally:
         conn.close()
     return n

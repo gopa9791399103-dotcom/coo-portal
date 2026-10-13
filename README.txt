@@ -24,6 +24,17 @@ COO PLANT PERFORMANCE BOARD  -  setup
    Remove it with "Clear sample data" before BU heads start real entry.
    Real entries are never overwritten or deleted by these buttons.
 
+Front page (Overview) - same layout as the COO slide
+ - 3 blocks: Day (n-1, pick any date) / MTD / YTD (April to date), rows BU1-BU4
+ - Columns: S, 5S, Q, P, C, D, M, E, Legal/ESG, Audits, Any Exception
+ - Green = achieved, Red = not achieved, dashed = no data. Click a circle for details.
+ - S  red if any LTI (single day: also any first aid)
+   5S average audit score vs target      Q customer PPM vs target
+   P  plan achievement vs target         D OTD vs target     M attendance vs target
+   C / E / Legal-ESG / Audits: BU head marks Achieved / Not achieved daily;
+      MTD/YTD green if achieved on >= 90% of days (COO > Settings > targets)
+   Any Exception: red if an escalation raised in the period is still open
+
 Rules
  - BU heads can enter / correct today and the previous 3 days (EDIT_DAYS in app.py).
  - One entry per plant per day; saving again updates it.

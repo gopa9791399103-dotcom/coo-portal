@@ -48,10 +48,25 @@
       {% if title == 'Manpower' %}<div class="calc">Attendance <b id="c_att">–</b></div>{% endif %}
     </fieldset>
     {% endfor %}
+    <fieldset class="wide" {{ 'disabled' if not can_edit else '' }}>
+      <legend>Cost, environment, legal &amp; audits</legend>
+      {% for c, label, help in flags %}
+      <div class="f {{ 'err' if errors.get(c) else '' }}">
+        <div class="flag-row">
+          <div><b class="flag-name">{{ label }}</b><span class="flag-help">{{ help }}</span></div>
+          <div class="yn" role="radiogroup" aria-label="{{ label }}">
+            <label class="opt ok"><input type="radio" name="{{ c }}" value="1" {{ 'checked' if values.get(c) == '1' else '' }} required><span>Achieved</span></label>
+            <label class="opt no"><input type="radio" name="{{ c }}" value="0" {{ 'checked' if values.get(c) == '0' else '' }}><span>Not achieved</span></label>
+          </div>
+        </div>
+        {% if errors.get(c) %}<div class="msg">{{ errors[c] }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </fieldset>
     <fieldset {{ 'disabled' if not can_edit else '' }}>
       <legend>Remarks</legend>
       <div class="f {{ 'err' if errors.get('remarks') else '' }}">
-        <label for="remarks">Key points for the COO <span>· breakdowns, LTI details, customer issues</span></label>
+        <label for="remarks">Key points for the COO <span>· breakdowns, LTI details, customer issues, reason for any "Not achieved"</span></label>
         <textarea id="remarks" name="remarks" rows="5" maxlength="500">{{ values.get('remarks', '') }}</textarea>
         {% if errors.get('remarks') %}<div class="msg">{{ errors['remarks'] }}</div>{% endif %}
       </div>

@@ -12,6 +12,7 @@
 <nav class="topnav"><div class="navin">
   <a class="brand" href="{{ url_for('home') }}">Plant Performance Board</a>
   <div class="links">
+    <a href="{{ url_for('overview') }}" class="{{ 'on' if active == 'ov' else '' }}">Overview</a>
     {% if user.role == 'bu' %}<a href="{{ url_for('entry') }}" class="{{ 'on' if active == 'entry' else '' }}">Daily entry</a>{% endif %}
     <a href="{{ url_for('dashboard') }}" class="{{ 'on' if active == 'dash' else '' }}">Dashboard</a>
     <a href="{{ url_for('escalations') }}" class="{{ 'on' if active == 'esc' else '' }}">Escalations</a>

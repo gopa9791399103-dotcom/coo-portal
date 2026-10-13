@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Plant Overview{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Office of the COO · {{ fy }}</div>
+    <h1>Plant indicator overview</h1>
+  </div>
+  <form method="get" class="controls">
+    <label class="eyebrow" for="date">Day (n-1)</label>
+    <input id="date" type="date" name="date" value="{{ d.isoformat() }}" max="{{ max_date }}" onchange="this.form.submit()">
+  </form>
+</div>
+
+<div class="ov-legend" aria-label="Legend">
+  <span><i class="dot r"></i>Not achieved</span>
+  <span><i class="dot g"></i>Achieved</span>
+  <span><i class="dot n"></i>No data</span>
+  <span class="muted">Click any circle for details</span>
+</div>
+
+{% set titles = {
+  'day': 'Indicators for ' ~ d.strftime('%a %d %b %Y'),
+  'mtd': 'Indicators MTD · ' ~ d.strftime('%B %Y'),
+  'ytd': 'Indicators YTD · ' ~ fy } %}
+{% set names = {'g': 'Achieved', 'r': 'Not achieved', 'n': 'No data'} %}
+
+{% for per, per_label in periods %}
+<section class="ov-block">
+  <div class="tbl-wrap">
+    <table class="ov">
+      <caption>{{ titles[per] }}</caption>
+      <thead>
+        <tr><th scope="col" class="ov-plant">Plants</th>
+          {% for key, col, name, rule in indicators %}<th scope="col" title="{{ name }}">{{ col }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in plants %}
+        <tr>
+          <th scope="row" class="ov-plant">{{ p.name }}</th>
+          {% for key, col, name, rule in indicators %}
+            {% set st, val, tgt = data[p.code][per][key] %}
+            <td><a class="dot {{ st }}" href="{{ url_for('indicator', key=key, bu=p.code, period=per, date=d.isoformat()) }}"
+                   title="{{ p.name }} · {{ name }} · {{ per_label }}: {{ val }}{{ ' (target ' ~ tgt ~ ')' if tgt else '' }}"
+                   aria-label="{{ p.name }} {{ name }} {{ per_label }}: {{ names[st] }}. {{ val }}"></a></td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+
+<footer>S Safety · 5S · Q Quality · P Production · C Cost · D Delivery · M Manpower · E Environment · Legal / ESG · Audits · Any exception = open escalation. Hover a circle to see the value.</footer>
+{% endblock %}

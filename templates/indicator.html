@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ ind[2] }} · Plant Overview{% endblock %}
+{% block content %}
+{% set names = {'g': 'Achieved', 'r': 'Not achieved', 'n': 'No data'} %}
+{% set pl = dict(periods) %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow"><a href="{{ url_for('overview', date=d.isoformat()) }}">← Overview</a> · {{ fy }}</div>
+    <h1>{{ ind[1] }}{% if ind[1] != ind[2] %} · {{ ind[2] }}{% endif %}</h1>
+  </div>
+  <form method="get" class="controls">
+    <input type="hidden" name="bu" value="{{ bu }}"><input type="hidden" name="period" value="{{ period }}">
+    <label class="eyebrow" for="date">Day (n-1)</label>
+    <input id="date" type="date" name="date" value="{{ d.isoformat() }}" max="{{ max_date }}" onchange="this.form.submit()">
+  </form>
+</div>
+
+<nav class="ind-tabs" aria-label="Indicators">
+  {% for k, col, name, rule in indicators %}
+  <a href="{{ url_for('indicator', key=k, bu=bu, period=period, date=d.isoformat()) }}" class="{{ 'on' if k == key else '' }}">
+    <i class="dot sm {{ data[bu][period][k][0] }}"></i>{{ col }}</a>
+  {% endfor %}
+</nav>
+
+<p class="rule">{{ ind[3] }}</p>
+
+<section class="panel">
+  <div class="sec-head"><h2>All plants</h2><p>Click a cell to see that plant and period</p></div>
+  <div class="tbl-wrap"><table class="ind-sum">
+    <thead><tr><th>Plant</th>{% for per, lab in periods %}<th>{{ lab }}{% if per == 'day' %} · {{ d.strftime('%d %b') }}{% endif %}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for p in plants %}
+      <tr class="{{ 'sel' if p.code == bu else '' }}">
+        <td class="bu">{{ p.name }}</td>
+        {% for per, lab in periods %}{% set st, val, tgt = data[p.code][per][key] %}
+        <td class="{{ 'cur' if p.code == bu and per == period else '' }}">
+          <a class="cell" href="{{ url_for('indicator', key=key, bu=p.code, period=per, date=d.isoformat()) }}">
+            <i class="dot sm {{ st }}"></i><span>{{ val }}{% if tgt %}<small>Target {{ tgt }}</small>{% endif %}</span></a>
+        </td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section class="panel">
+  {% if key == 'exception' %}
+    <div class="sec-head"><h2>{{ bu }} escalations · {{ pl[period] }}</h2><p>{{ a0.strftime('%d %b %Y') }} – {{ a1.strftime('%d %b %Y') }} · <a href="{{ url_for('escalations') }}">Manage</a></p></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Status</th><th>Area</th><th>Issue</th><th>Owner</th><th>Raised</th><th class="r-num">Days</th><th>Severity</th></tr></thead>
+      <tbody>
+      {% for e in esc_rows %}
+        <tr><td><span class="pill {{ 'r' if e.status == 'Open' else 'g' }}">{{ e.status }}</span></td>
+          <td>{{ e.area }}</td><td>{{ e.issue }}{% if e.closure_note %}<div class="own">Closed: {{ e.closure_note }}</div>{% endif %}</td>
+          <td class="own">{{ e.owner }}</td><td class="own">{{ e.raised_on.strftime('%d %b') }} · {{ e.raised_by }}</td>
+          <td class="r-num">{{ e.days }}</td><td><span class="pill {{ 'r' if e.severity == 'Critical' else 'a' }}">{{ e.severity }}</span></td></tr>
+      {% else %}
+        <tr><td colspan="7" class="muted">No escalations raised in this period.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  {% else %}
+    <div class="sec-head">
+      <h2>{{ bu }} · {{ 'Month by month' if period == 'ytd' else 'Day by day' }}</h2>
+      <p>{{ a0.strftime('%d %b %Y') if period != 'day' else (d.strftime('%d %b %Y') ~ ' and previous 6 days') }}{% if period != 'day' %} – {{ a1.strftime('%d %b %Y') }}{% endif %}</p>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>{{ 'Month' if period == 'ytd' else 'Date' }}</th><th>Status</th><th>Value</th><th>{{ 'Days' if period == 'ytd' else 'Remarks' }}</th>{% if period != 'ytd' %}<th>By</th>{% endif %}</tr></thead>
+      <tbody>
+      {% for r in log %}
+        <tr><td class="num">{{ r.label }}</td>
+          <td><span class="stat"><i class="dot sm {{ r.status }}"></i>{{ names[r.status] }}</span></td>
+          <td class="num">{{ r.value }}</td><td class="own">{{ r.remarks }}</td>
+          {% if period != 'ytd' %}<td class="own">{{ r.get('by', '') }}</td>{% endif %}</tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  {% endif %}
+</section>
+{% endblock %}
